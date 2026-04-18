@@ -11,23 +11,25 @@ NICHE: accessibility-tools
 PRICE: $$15/mo
 
 ARCHITECTURE SPEC:
-A web-based IDE built with Next.js that provides screen reader optimized code editing with intelligent audio feedback, keyboard navigation, and accessibility-first design. The architecture uses Monaco Editor with custom accessibility extensions, real-time syntax analysis for audio cues, and integrates with popular screen readers through ARIA live regions and semantic markup.
+A web-based IDE with screen reader-optimized interfaces, built on Monaco Editor with custom accessibility layers. Features real-time audio feedback for syntax errors, semantic code navigation, and keyboard shortcuts designed for NVDA/JAWS/VoiceOver compatibility.
 
 PLANNED FILES:
 - app/page.tsx
 - app/editor/page.tsx
-- app/api/auth/[...nextauth]/route.ts
-- app/api/lemonsqueezy/webhook/route.ts
+- app/api/auth/route.ts
+- app/api/webhooks/lemonsqueezy/route.ts
 - components/AccessibleEditor.tsx
 - components/AudioFeedback.tsx
-- components/KeyboardNavigator.tsx
-- components/SyntaxAnnouncer.tsx
+- components/CodeNavigator.tsx
+- components/KeyboardShortcuts.tsx
 - lib/screen-reader-utils.ts
-- lib/audio-feedback.ts
+- lib/syntax-analyzer.ts
+- lib/audio-engine.ts
 - lib/lemonsqueezy.ts
-- lib/auth.ts
+- hooks/useAccessibleNavigation.ts
+- hooks/useAudioFeedback.ts
 
-DEPENDENCIES: next, tailwindcss, @monaco-editor/react, next-auth, @lemonsqueezy/lemonsqueezy.js, react-hotkeys-hook, web-speech-api, tone, prisma, @prisma/client, lucide-react
+DEPENDENCIES: next, tailwindcss, @monaco-editor/react, next-auth, @lemonsqueezy/lemonsqueezy.js, web-speech-api, tone, prisma, @prisma/client, zod, react-hotkeys-hook, @radix-ui/react-dialog, @radix-ui/react-select
 
 REQUIREMENTS:
 - Next.js 15 with App Router (app/ directory)
@@ -67,3 +69,8 @@ After creating all files:
 
 Do NOT use placeholder text. Write real, helpful content for the landing page
 and the tool itself. The tool should actually work and provide value.
+
+
+PREVIOUS ATTEMPT FAILED WITH:
+Codex timed out after 600s
+Please fix the above errors and regenerate.

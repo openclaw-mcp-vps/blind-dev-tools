@@ -1,34 +1,49 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
+import AccessibleEditor from "@/components/AccessibleEditor";
+import UnlockForm from "@/components/UnlockForm";
+import { verifyAccessToken } from "@/lib/lemonsqueezy";
 
-import { AccessibleEditor } from "@/components/AccessibleEditor";
-import { CheckoutButton } from "@/components/CheckoutButton";
-import { hasPaidAccess } from "@/lib/access-store";
+export const metadata = {
+  title: "Editor",
+  description: "Screen reader optimized coding workspace",
+};
 
 export default async function EditorPage() {
   const cookieStore = await cookies();
-  const accessCookie = cookieStore.get("bdt_access")?.value;
-  const sessionId = cookieStore.get("bdt_session")?.value;
-  const paid = accessCookie === "paid" || (await hasPaidAccess(sessionId));
+  const accessCookie = cookieStore.get("bdt_access")?.value ?? "";
+  const secret = process.env.LEMON_SQUEEZY_WEBHOOK_SECRET ?? "development-secret";
+  const access = verifyAccessToken(accessCookie, secret);
 
-  if (!paid) {
+  if (!access.valid) {
     return (
-      <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col items-center justify-center gap-6 px-6 text-center">
-        <h1 className="text-3xl font-semibold">Editor locked behind active subscription</h1>
-        <p className="max-w-2xl text-[var(--muted)]">
-          This coding workspace is available to paying users so we can fund ongoing accessibility improvements and
-          maintain compatibility with NVDA, JAWS, and VoiceOver updates.
-        </p>
-        <CheckoutButton label="Subscribe for $15/month" />
-        <Link href="/" className="text-sm text-[var(--muted)] underline underline-offset-4">
-          Back to landing page
-        </Link>
+      <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col justify-center px-4 py-12 sm:px-6">
+        <section className="rounded-2xl border border-white/10 bg-[#151b23] p-6">
+          <h1 className="text-2xl font-semibold text-white">Editor access is locked</h1>
+          <p className="mt-2 text-sm text-slate-300">
+            The workspace is available after purchase. Complete checkout, then unlock access with your billing email.
+          </p>
+          <div className="mt-6 space-y-3">
+            <Link
+              href="/"
+              className="inline-flex rounded-md border border-white/20 px-3 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10"
+            >
+              Back to pricing
+            </Link>
+            <UnlockForm className="rounded-xl border border-white/10 bg-[#0d1117] p-4" />
+          </div>
+        </section>
       </main>
     );
   }
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-6 py-10">
+    <main className="mx-auto w-full max-w-[1400px] px-4 pb-10 pt-6 sm:px-6 lg:px-8">
+      <header className="mb-4 rounded-xl border border-white/10 bg-[#151b23] px-4 py-3">
+        <p className="text-xs uppercase tracking-[0.16em] text-cyan-200">Active Subscription</p>
+        <h1 className="mt-1 text-xl font-semibold text-white">Blind Dev Tools Editor</h1>
+        <p className="mt-1 text-sm text-slate-300">Signed in as {access.email}</p>
+      </header>
       <AccessibleEditor />
     </main>
   );

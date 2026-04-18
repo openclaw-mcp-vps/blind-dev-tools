@@ -1,19 +1,41 @@
-export function formatLineAnnouncement(line: number, column: number) {
-  return `Line ${line}, column ${column}`;
+import type { CodeSymbol, SyntaxIssue } from "@/lib/syntax-analyzer";
+
+export const SCREEN_READER_SHORTCUTS = {
+  nextSymbol: "Alt+N",
+  previousSymbol: "Alt+P",
+  nextError: "Alt+E",
+  announceStatus: "Alt+S",
+  openShortcutHelp: "Shift+/",
+} as const;
+
+export function sanitizeAnnouncement(message: string): string {
+  return message.replace(/\s+/g, " ").trim();
 }
 
-export function buildSyntaxAnnouncement(message: string, line?: number, column?: number) {
-  if (!line || !column) {
-    return `Syntax issue: ${message}`;
-  }
-
-  return `Syntax issue on line ${line}, column ${column}. ${message}`;
+export function buildEditorAriaLabel(fileName: string, language: string): string {
+  return `${fileName} editor. Language ${language}. Screen reader optimized code editing enabled.`;
 }
 
-export function countWords(text: string) {
-  return text.trim() ? text.trim().split(/\s+/).length : 0;
+export function formatIssueForSpeech(issue: SyntaxIssue, index: number, total: number): string {
+  return sanitizeAnnouncement(
+    `Issue ${index + 1} of ${total}. ${issue.severity}. Line ${issue.line}, column ${issue.column}. ${issue.message}`,
+  );
 }
 
-export function getAccessibilityHint() {
-  return "Use Control plus slash to open keyboard shortcuts, Alt plus N for next syntax issue, and Alt plus P for previous syntax issue.";
+export function summarizeNavigatorTarget(symbol: CodeSymbol): string {
+  return sanitizeAnnouncement(`${symbol.type} ${symbol.name} at line ${symbol.line}`);
+}
+
+export function createStatusAnnouncement(input: {
+  cursorLine: number;
+  totalLines: number;
+  issueCount: number;
+  symbolCount: number;
+}): string {
+  const issueText = input.issueCount === 0 ? "No syntax issues" : `${input.issueCount} syntax issues`;
+  const symbolText = input.symbolCount === 0 ? "No symbols" : `${input.symbolCount} symbols indexed`;
+
+  return sanitizeAnnouncement(
+    `Cursor at line ${input.cursorLine} of ${input.totalLines}. ${issueText}. ${symbolText}.`,
+  );
 }
