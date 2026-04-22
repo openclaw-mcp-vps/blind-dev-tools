@@ -1,50 +1,70 @@
 import type { Metadata } from "next";
-import "@/app/globals.css";
-import { Geist } from "next/font/google";
-import { cn } from "@/lib/utils";
+import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import "./globals.css";
 
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
+const plexSans = IBM_Plex_Sans({
+  subsets: ["latin"],
+  variable: "--font-plex-sans",
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  variable: "--font-plex-mono",
+  weight: ["400", "500", "600"],
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://blind-dev-tools.com"),
   title: {
-    default: "Blind Dev Tools | Screen Reader Optimized Development Environment",
-    template: "%s | Blind Dev Tools",
+    default: "blind-dev-tools | Screen reader optimized development environment",
+    template: "%s | blind-dev-tools",
   },
   description:
-    "Blind Dev Tools is a screen reader optimized IDE for NVDA, JAWS, and VoiceOver with intelligent audio syntax feedback and keyboard-first navigation.",
+    "blind-dev-tools is a screen reader optimized development environment with semantic code navigation, intelligent audio feedback, and keyboard-first workflows for NVDA, JAWS, and VoiceOver.",
   keywords: [
     "accessible IDE",
-    "screen reader development tools",
-    "blind developers",
+    "screen reader developer tools",
     "NVDA coding",
-    "JAWS IDE",
+    "JAWS coding",
     "VoiceOver programming",
-    "accessible engineering tools",
+    "blind developer tools",
   ],
   openGraph: {
     type: "website",
-    url: "https://blind-dev-tools.com",
-    title: "Blind Dev Tools",
+    title: "blind-dev-tools | Screen reader optimized development environment",
     description:
-      "A screen reader optimized coding environment with semantic navigation, spoken syntax diagnostics, and keyboard-first workflows.",
-    siteName: "Blind Dev Tools",
+      "A web-based IDE designed for blind and visually impaired developers with fast keyboard workflows and real-time spoken diagnostics.",
+    siteName: "blind-dev-tools",
+    url: "https://blind-dev-tools.com",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Blind Dev Tools",
+    title: "blind-dev-tools",
     description:
-      "Screen reader optimized development environment with semantic navigation and intelligent audio feedback.",
+      "Screen reader optimized coding with semantic navigation and intelligent audio feedback.",
   },
   alternates: {
     canonical: "/",
   },
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html lang="en" suppressHydrationWarning className={cn("font-sans", geist.variable)}>
-      <body className="bg-[#0d1117] text-slate-100 antialiased">{children}</body>
+    <html
+      lang="en"
+      className={`${plexSans.variable} ${plexMono.variable} dark`}
+      suppressHydrationWarning
+    >
+      <body className="min-h-screen bg-background text-foreground antialiased">
+        {children}
+      </body>
     </html>
   );
 }

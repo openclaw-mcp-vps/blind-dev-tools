@@ -11,25 +11,24 @@ NICHE: accessibility-tools
 PRICE: $$15/mo
 
 ARCHITECTURE SPEC:
-A web-based IDE with screen reader-optimized interfaces, built on Monaco Editor with custom accessibility layers. Features real-time audio feedback for syntax errors, semantic code navigation, and keyboard shortcuts designed for NVDA/JAWS/VoiceOver compatibility.
+A web-based IDE with screen reader-optimized interfaces, built on Monaco Editor with custom accessibility layers. Features real-time audio feedback, semantic code navigation, and ARIA-enhanced UI components that integrate seamlessly with assistive technologies.
 
 PLANNED FILES:
 - app/page.tsx
 - app/editor/page.tsx
 - app/api/auth/route.ts
-- app/api/webhooks/lemonsqueezy/route.ts
+- app/api/lemonsqueezy/webhook/route.ts
 - components/AccessibleEditor.tsx
 - components/AudioFeedback.tsx
 - components/CodeNavigator.tsx
-- components/KeyboardShortcuts.tsx
-- lib/screen-reader-utils.ts
-- lib/syntax-analyzer.ts
-- lib/audio-engine.ts
+- components/ScreenReaderOptimizedUI.tsx
+- lib/accessibility-engine.ts
+- lib/audio-synthesis.ts
+- lib/keyboard-shortcuts.ts
 - lib/lemonsqueezy.ts
-- hooks/useAccessibleNavigation.ts
-- hooks/useAudioFeedback.ts
+- lib/syntax-analyzer.ts
 
-DEPENDENCIES: next, tailwindcss, @monaco-editor/react, next-auth, @lemonsqueezy/lemonsqueezy.js, web-speech-api, tone, prisma, @prisma/client, zod, react-hotkeys-hook, @radix-ui/react-dialog, @radix-ui/react-select
+DEPENDENCIES: next, tailwindcss, @monaco-editor/react, @lemonsqueezy/lemonsqueezy.js, next-auth, prisma, @prisma/client, react-hotkeys-hook, web-speech-api, tone, react-aria, @headlessui/react, framer-motion
 
 REQUIREMENTS:
 - Next.js 15 with App Router (app/ directory)
@@ -37,7 +36,7 @@ REQUIREMENTS:
 - Tailwind CSS v4
 - shadcn/ui components (npx shadcn@latest init, then add needed components)
 - Dark theme ONLY — background #0d1117, no light mode
-- Lemon Squeezy checkout overlay for payments
+- Stripe Payment Link for payments (hosted checkout — use the URL directly as the Buy button href)
 - Landing page that converts: hero, problem, solution, pricing, FAQ
 - The actual tool/feature behind a paywall (cookie-based access after purchase)
 - Mobile responsive
@@ -57,9 +56,13 @@ REQUIREMENTS:
   to package.json dependencies and re-run npm install + npm run build until it passes.
 
 ENVIRONMENT VARIABLES (create .env.example):
-- NEXT_PUBLIC_LEMON_SQUEEZY_STORE_ID
-- NEXT_PUBLIC_LEMON_SQUEEZY_PRODUCT_ID
-- LEMON_SQUEEZY_WEBHOOK_SECRET
+- NEXT_PUBLIC_STRIPE_PAYMENT_LINK  (full URL, e.g. https://buy.stripe.com/test_XXX)
+- NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY  (pk_test_... or pk_live_...)
+- STRIPE_WEBHOOK_SECRET  (set when webhook is wired)
+
+BUY BUTTON RULE: the Buy button's href MUST be `process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK`
+used as-is — do NOT construct URLs from a product ID, do NOT prepend any base URL,
+do NOT wrap it in an embed iframe. The link opens Stripe's hosted checkout directly.
 
 After creating all files:
 1. Run: npm install
@@ -72,5 +75,23 @@ and the tool itself. The tool should actually work and provide value.
 
 
 PREVIOUS ATTEMPT FAILED WITH:
-Codex timed out after 600s
+Codex exited 1: Reading additional input from stdin...
+OpenAI Codex v0.121.0 (research preview)
+--------
+workdir: /tmp/openclaw-builds/blind-dev-tools
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019db450-8774-7d22-bd33-1633f04ad399
+--------
+user
+# Build Task: blind-dev-tools
+
+Build a complete, production-ready Next.js 15 App Router application.
+
+PROJECT: blind-dev-tools
+HEADLINE: Screen reader optimized developme
 Please fix the above errors and regenerate.

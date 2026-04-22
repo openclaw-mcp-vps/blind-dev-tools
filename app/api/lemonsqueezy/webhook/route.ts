@@ -1,54 +1,41 @@
 import { NextResponse } from "next/server";
-
-import { addPaidSession } from "@/lib/access-store";
-import { verifyWebhookSignature } from "@/lib/lemonsqueezy-server";
-
-type LemonWebhookPayload = {
-  meta?: {
-    event_name?: string;
-    custom_data?: {
-      session_id?: string;
-    };
-  };
-  data?: {
-    attributes?: {
-      custom_data?: {
-        session_id?: string;
-      };
-      first_order_item?: {
-        product_id?: number;
-      };
-    };
-  };
-};
+import {
+  recordSuccessfulSessionFromStripeEvent,
+  verifyStripeWebhookSignature,
+} from "@/lib/lemonsqueezy";
 
 export async function POST(request: Request) {
+  const signature = request.headers.get("stripe-signature");
   const rawBody = await request.text();
-  const signature = request.headers.get("x-signature");
 
-  if (!verifyWebhookSignature(rawBody, signature)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  if (!verifyStripeWebhookSignature(rawBody, signature)) {
+    return NextResponse.json(
+      { ok: false, error: "Invalid Stripe signature." },
+      { status: 400 }
+    );
   }
 
-  const payload = JSON.parse(rawBody) as LemonWebhookPayload;
-  const eventName = payload.meta?.event_name;
+  let event: unknown;
 
-  if (eventName !== "order_created" && eventName !== "subscription_created") {
-    return NextResponse.json({ received: true });
+  try {
+    event = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "Webhook payload is not valid JSON." },
+      { status: 400 }
+    );
   }
 
-  const configuredProduct = Number(process.env.NEXT_PUBLIC_LEMON_SQUEEZY_PRODUCT_ID ?? "0");
-  const productId = payload.data?.attributes?.first_order_item?.product_id;
+  const result = await recordSuccessfulSessionFromStripeEvent(event);
 
-  if (configuredProduct && productId && configuredProduct !== productId) {
-    return NextResponse.json({ received: true });
+  if (!result) {
+    return NextResponse.json({ ok: true, ignored: true });
   }
 
-  const sessionId = payload.meta?.custom_data?.session_id ?? payload.data?.attributes?.custom_data?.session_id;
-
-  if (sessionId) {
-    await addPaidSession(sessionId);
-  }
-
-  return NextResponse.json({ received: true });
+  return NextResponse.json({
+    ok: true,
+    recorded: true,
+    sessionId: result.sessionId,
+    email: result.customerEmail ?? null,
+  });
 }

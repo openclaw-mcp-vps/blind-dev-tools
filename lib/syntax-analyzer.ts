@@ -1,114 +1,147 @@
-export type SyntaxSeverity = "error" | "warning";
+import { sortDiagnostics, type Diagnostic } from "@/lib/accessibility-engine";
 
-export interface SyntaxIssue {
-  line: number;
-  column: number;
-  message: string;
-  severity: SyntaxSeverity;
-  source?: string;
-}
+const matchingPairs: Record<string, string> = {
+  "(": ")",
+  "[": "]",
+  "{": "}",
+};
 
-export interface CodeSymbol {
-  name: string;
-  type: "function" | "class" | "interface" | "variable" | "export";
-  line: number;
-}
+export function analyzeSyntaxHeuristics(code: string): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const lines = code.split("\n");
+  const stack: Array<{ char: string; line: number; column: number }> = [];
 
-interface MonacoMarkerLike {
-  startLineNumber: number;
-  startColumn: number;
-  message: string;
-  severity: number;
-  source?: string;
-}
+  let inString: "single" | "double" | "template" | null = null;
+  let escaped = false;
 
-const FUNCTION_REGEX = /^\s*(?:export\s+)?(?:async\s+)?function\s+([\w$]+)/;
-const CLASS_REGEX = /^\s*(?:export\s+)?class\s+([\w$]+)/;
-const INTERFACE_REGEX = /^\s*(?:export\s+)?interface\s+([\w$]+)/;
-const CONST_FUNCTION_REGEX =
-  /^\s*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*=\s*(?:async\s+)?\(?[^=]*\)?\s*=>/;
-const EXPORT_REGEX = /^\s*export\s+(?:default\s+)?(?:const|let|var|function|class|interface)?\s*([\w$]+)?/;
+  lines.forEach((lineText, lineIndex) => {
+    const line = lineIndex + 1;
 
-export function markersToIssues(markers: MonacoMarkerLike[]): SyntaxIssue[] {
-  return markers
-    .map((marker) => ({
-      line: marker.startLineNumber,
-      column: marker.startColumn,
-      message: marker.message,
-      severity: (marker.severity >= 8 ? "error" : "warning") as SyntaxSeverity,
-      source: marker.source,
-    }))
-    .sort((a, b) => {
-      if (a.line !== b.line) {
-        return a.line - b.line;
+    if (lineText.length > 140) {
+      diagnostics.push({
+        severity: "warning",
+        line,
+        column: 1,
+        message:
+          "Line exceeds 140 characters. Consider wrapping for easier spoken review.",
+        source: "Accessibility",
+      });
+    }
+
+    if (/^(\t+ +| +\t+)/.test(lineText)) {
+      diagnostics.push({
+        severity: "warning",
+        line,
+        column: 1,
+        message: "Mixed tabs and spaces detected at line start.",
+        source: "Accessibility",
+      });
+    }
+
+    if (/\b(?:TODO|FIXME|HACK)\b/.test(lineText)) {
+      diagnostics.push({
+        severity: "info",
+        line,
+        column: Math.max(1, lineText.search(/\b(?:TODO|FIXME|HACK)\b/) + 1),
+        message:
+          "Action marker found (TODO/FIXME/HACK). Confirm this is intentional before release.",
+        source: "Heuristic",
+      });
+    }
+
+    for (let columnIndex = 0; columnIndex < lineText.length; columnIndex += 1) {
+      const char = lineText[columnIndex];
+      const column = columnIndex + 1;
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+
+        if (char === "\\") {
+          escaped = true;
+          continue;
+        }
+
+        if (
+          (inString === "single" && char === "'") ||
+          (inString === "double" && char === '"') ||
+          (inString === "template" && char === "`")
+        ) {
+          inString = null;
+        }
+
+        continue;
       }
 
-      return a.column - b.column;
-    });
-}
+      if (char === "'") {
+        inString = "single";
+        continue;
+      }
 
-export function extractSymbols(code: string): CodeSymbol[] {
-  const lines = code.split("\n");
-  const symbols: CodeSymbol[] = [];
+      if (char === '"') {
+        inString = "double";
+        continue;
+      }
 
-  lines.forEach((lineText, index) => {
-    const line = index + 1;
+      if (char === "`") {
+        inString = "template";
+        continue;
+      }
 
-    const classMatch = lineText.match(CLASS_REGEX);
-    if (classMatch?.[1]) {
-      symbols.push({ name: classMatch[1], type: "class", line });
-      return;
-    }
+      if (char in matchingPairs) {
+        stack.push({ char, line, column });
+        continue;
+      }
 
-    const interfaceMatch = lineText.match(INTERFACE_REGEX);
-    if (interfaceMatch?.[1]) {
-      symbols.push({ name: interfaceMatch[1], type: "interface", line });
-      return;
-    }
+      if (Object.values(matchingPairs).includes(char)) {
+        const opener = stack.pop();
 
-    const functionMatch = lineText.match(FUNCTION_REGEX);
-    if (functionMatch?.[1]) {
-      symbols.push({ name: functionMatch[1], type: "function", line });
-      return;
-    }
+        if (!opener) {
+          diagnostics.push({
+            severity: "error",
+            line,
+            column,
+            message: `Unmatched closing delimiter ${char}.`,
+            source: "Syntax heuristic",
+          });
+          continue;
+        }
 
-    const constFunctionMatch = lineText.match(CONST_FUNCTION_REGEX);
-    if (constFunctionMatch?.[1]) {
-      symbols.push({ name: constFunctionMatch[1], type: "function", line });
-      return;
-    }
-
-    const exportMatch = lineText.match(EXPORT_REGEX);
-    if (exportMatch?.[1]) {
-      symbols.push({ name: exportMatch[1], type: "export", line });
-      return;
-    }
-
-    const variableMatch = lineText.match(/^\s*(?:const|let|var)\s+([\w$]+)/);
-    if (variableMatch?.[1]) {
-      symbols.push({ name: variableMatch[1], type: "variable", line });
+        const expectedCloser = matchingPairs[opener.char];
+        if (expectedCloser !== char) {
+          diagnostics.push({
+            severity: "error",
+            line,
+            column,
+            message: `Mismatched delimiter. Expected ${expectedCloser} to close ${opener.char}.`,
+            source: "Syntax heuristic",
+          });
+        }
+      }
     }
   });
 
-  return symbols;
-}
-
-export function summarizeIssues(issues: SyntaxIssue[]): string {
-  if (issues.length === 0) {
-    return "No syntax issues detected.";
+  if (inString) {
+    diagnostics.push({
+      severity: "error",
+      line: lines.length,
+      column: Math.max(1, lines.at(-1)?.length ?? 1),
+      message: "Unterminated string literal detected.",
+      source: "Syntax heuristic",
+    });
   }
 
-  const errors = issues.filter((issue) => issue.severity === "error").length;
-  const warnings = issues.length - errors;
-  const parts: string[] = [];
+  stack.forEach((unclosed) => {
+    diagnostics.push({
+      severity: "error",
+      line: unclosed.line,
+      column: unclosed.column,
+      message: `Unclosed delimiter ${unclosed.char}.`,
+      source: "Syntax heuristic",
+    });
+  });
 
-  if (errors > 0) {
-    parts.push(`${errors} error${errors === 1 ? "" : "s"}`);
-  }
-
-  if (warnings > 0) {
-    parts.push(`${warnings} warning${warnings === 1 ? "" : "s"}`);
-  }
-
-  return `Detected ${parts.join(" and ")}.`;
+  return sortDiagnostics(diagnostics);
 }

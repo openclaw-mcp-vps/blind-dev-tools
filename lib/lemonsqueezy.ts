@@ -1,267 +1,230 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { promises as fs } from "node:fs";
-import path from "node:path";
+import crypto from "crypto";
+import { promises as fs } from "fs";
+import path from "path";
 
-export interface PurchaseRecord {
-  email: string;
-  orderId: string;
-  eventName: string;
-  status: string;
-  paid: boolean;
-  productId?: string;
+export const ACCESS_COOKIE_NAME = "blind_dev_tools_access";
+export const ACCESS_COOKIE_TTL_SECONDS = 60 * 60 * 24 * 30;
+
+interface PurchaseRecord {
+  sessionId: string;
+  status: "paid" | "pending";
+  customerEmail?: string;
+  amountTotal?: number;
+  currency?: string;
+  eventId: string;
   updatedAt: string;
 }
 
 interface PurchaseStore {
-  purchases: Record<string, PurchaseRecord>;
+  sessions: Record<string, PurchaseRecord>;
 }
 
-interface AccessTokenPayload {
-  email: string;
-  exp: number;
+interface StripeWebhookEvent {
+  id: string;
+  type: string;
+  data?: {
+    object?: Record<string, unknown>;
+  };
 }
 
-const DATA_DIRECTORY = path.join(process.cwd(), "data");
-const PURCHASE_STORE_FILE = path.join(DATA_DIRECTORY, "purchases.json");
+const DATA_DIR = path.join(process.cwd(), "data");
+const PURCHASES_FILE = path.join(DATA_DIR, "purchases.json");
+const LOCAL_FALLBACK_SECRET = "blind-dev-tools-local-signing-secret";
 
-const PAID_EVENTS = new Set([
-  "order_created",
-  "order_paid",
-  "subscription_created",
-  "subscription_payment_success",
-  "subscription_resumed",
-]);
-
-const UNPAID_EVENTS = new Set([
-  "order_refunded",
-  "subscription_cancelled",
-  "subscription_expired",
-  "subscription_paused",
-]);
-
-function toBase64Url(value: string): string {
-  return Buffer.from(value, "utf8").toString("base64url");
+function getSigningSecret(): string {
+  return process.env.STRIPE_WEBHOOK_SECRET || LOCAL_FALLBACK_SECRET;
 }
 
-function fromBase64Url(value: string): string {
-  return Buffer.from(value, "base64url").toString("utf8");
+function hashWithSecret(payload: string): string {
+  return crypto.createHmac("sha256", getSigningSecret()).update(payload).digest("hex");
 }
 
-export function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
+function timingSafeCompare(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
 
-export function buildCheckoutUrl(productOrVariantId: string): string {
-  return `https://checkout.lemonsqueezy.com/buy/${productOrVariantId}?embed=1&media=0&logo=0`;
-}
-
-export function verifyWebhookSignature(rawBody: string, signature: string, secret: string): boolean {
-  const digest = createHmac("sha256", secret).update(rawBody).digest("hex");
-  const digestBuffer = Buffer.from(digest, "utf8");
-  const signatureBuffer = Buffer.from(signature, "utf8");
-
-  if (digestBuffer.length !== signatureBuffer.length) {
+  if (leftBuffer.length !== rightBuffer.length) {
     return false;
   }
 
-  return timingSafeEqual(digestBuffer, signatureBuffer);
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-async function ensurePurchaseStore(): Promise<void> {
-  await fs.mkdir(DATA_DIRECTORY, { recursive: true });
-
+async function ensureStore(): Promise<PurchaseStore> {
   try {
-    await fs.access(PURCHASE_STORE_FILE);
-  } catch {
-    const initial: PurchaseStore = { purchases: {} };
-    await fs.writeFile(PURCHASE_STORE_FILE, JSON.stringify(initial, null, 2), "utf8");
-  }
-}
+    const raw = await fs.readFile(PURCHASES_FILE, "utf8");
+    const parsed = JSON.parse(raw) as PurchaseStore;
 
-async function readStore(): Promise<PurchaseStore> {
-  await ensurePurchaseStore();
-  const data = await fs.readFile(PURCHASE_STORE_FILE, "utf8");
-  const parsed = JSON.parse(data) as PurchaseStore;
-
-  if (!parsed.purchases) {
-    return { purchases: {} };
-  }
-
-  return parsed;
-}
-
-async function writeStore(store: PurchaseStore): Promise<void> {
-  await fs.writeFile(PURCHASE_STORE_FILE, JSON.stringify(store, null, 2), "utf8");
-}
-
-function readEmailFromPayload(payload: Record<string, unknown>): string {
-  const data = payload.data as Record<string, unknown> | undefined;
-  const attributes = data?.attributes as Record<string, unknown> | undefined;
-  const meta = payload.meta as Record<string, unknown> | undefined;
-  const customData = meta?.custom_data as Record<string, unknown> | undefined;
-
-  const candidates = [
-    attributes?.user_email,
-    attributes?.customer_email,
-    customData?.email,
-    customData?.user_email,
-  ];
-
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.includes("@")) {
-      return normalizeEmail(candidate);
+    if (!parsed.sessions || typeof parsed.sessions !== "object") {
+      return { sessions: {} };
     }
-  }
 
-  return "";
+    return parsed;
+  } catch {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    const initialStore: PurchaseStore = { sessions: {} };
+    await fs.writeFile(PURCHASES_FILE, JSON.stringify(initialStore, null, 2), "utf8");
+    return initialStore;
+  }
 }
 
-function readOrderIdFromPayload(payload: Record<string, unknown>): string {
-  const data = payload.data as Record<string, unknown> | undefined;
-  const attributes = data?.attributes as Record<string, unknown> | undefined;
-
-  if (typeof attributes?.order_id === "number") {
-    return String(attributes.order_id);
-  }
-
-  if (typeof attributes?.order_id === "string") {
-    return attributes.order_id;
-  }
-
-  if (typeof data?.id === "string") {
-    return data.id;
-  }
-
-  return "unknown-order";
+async function saveStore(store: PurchaseStore): Promise<void> {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(PURCHASES_FILE, JSON.stringify(store, null, 2), "utf8");
 }
 
-function readProductIdFromPayload(payload: Record<string, unknown>): string | undefined {
-  const data = payload.data as Record<string, unknown> | undefined;
-  const attributes = data?.attributes as Record<string, unknown> | undefined;
-  const firstOrderItem = attributes?.first_order_item as Record<string, unknown> | undefined;
-
-  if (typeof firstOrderItem?.product_id === "number") {
-    return String(firstOrderItem.product_id);
-  }
-
-  if (typeof firstOrderItem?.product_id === "string") {
-    return firstOrderItem.product_id;
-  }
-
-  return undefined;
-}
-
-function resolvePaidFlag(eventName: string, status: string, previousValue?: boolean): boolean {
-  if (PAID_EVENTS.has(eventName)) {
-    return true;
-  }
-
-  if (UNPAID_EVENTS.has(eventName)) {
-    return false;
-  }
-
-  const normalizedStatus = status.toLowerCase();
-  if (["paid", "active", "on_trial"].includes(normalizedStatus)) {
-    return true;
-  }
-
-  if (["refunded", "cancelled", "expired", "failed"].includes(normalizedStatus)) {
-    return false;
-  }
-
-  return previousValue ?? false;
-}
-
-export async function upsertPurchaseFromWebhook(payload: Record<string, unknown>): Promise<PurchaseRecord | null> {
-  const meta = payload.meta as Record<string, unknown> | undefined;
-  const data = payload.data as Record<string, unknown> | undefined;
-  const attributes = data?.attributes as Record<string, unknown> | undefined;
-
-  const eventName = typeof meta?.event_name === "string" ? meta.event_name : "unknown_event";
-  const email = readEmailFromPayload(payload);
-
-  if (!email) {
+function parseStripeEvent(payload: unknown): StripeWebhookEvent | null {
+  if (!payload || typeof payload !== "object") {
     return null;
   }
 
-  const orderId = readOrderIdFromPayload(payload);
-  const statusRaw =
-    typeof attributes?.status === "string"
-      ? attributes.status
-      : typeof attributes?.status_formatted === "string"
-        ? attributes.status_formatted
-        : "unknown";
+  const candidate = payload as StripeWebhookEvent;
 
-  const productId = readProductIdFromPayload(payload);
+  if (typeof candidate.id !== "string" || typeof candidate.type !== "string") {
+    return null;
+  }
 
-  const store = await readStore();
-  const previous = store.purchases[email];
+  return candidate;
+}
 
-  const nextRecord: PurchaseRecord = {
-    email,
-    orderId,
-    eventName,
-    status: statusRaw,
-    paid: resolvePaidFlag(eventName, statusRaw, previous?.paid),
-    productId,
+export async function recordSuccessfulSessionFromStripeEvent(
+  payload: unknown
+): Promise<PurchaseRecord | null> {
+  const event = parseStripeEvent(payload);
+  if (!event) {
+    return null;
+  }
+
+  const acceptedEvents = new Set([
+    "checkout.session.completed",
+    "checkout.session.async_payment_succeeded",
+  ]);
+
+  if (!acceptedEvents.has(event.type)) {
+    return null;
+  }
+
+  const session = event.data?.object;
+  if (!session) {
+    return null;
+  }
+
+  const sessionId = typeof session.id === "string" ? session.id : null;
+  if (!sessionId) {
+    return null;
+  }
+
+  const paymentStatus =
+    typeof session.payment_status === "string" ? session.payment_status : "pending";
+
+  if (paymentStatus !== "paid" && event.type !== "checkout.session.async_payment_succeeded") {
+    return null;
+  }
+
+  const store = await ensureStore();
+  const record: PurchaseRecord = {
+    sessionId,
+    status: "paid",
+    customerEmail:
+      typeof session.customer_email === "string" ? session.customer_email : undefined,
+    amountTotal:
+      typeof session.amount_total === "number" ? session.amount_total : undefined,
+    currency: typeof session.currency === "string" ? session.currency : undefined,
+    eventId: event.id,
     updatedAt: new Date().toISOString(),
   };
 
-  store.purchases[email] = nextRecord;
-  await writeStore(store);
+  store.sessions[sessionId] = record;
+  await saveStore(store);
 
-  return nextRecord;
+  return record;
 }
 
-export async function findPurchaseByEmail(email: string): Promise<PurchaseRecord | null> {
-  const normalized = normalizeEmail(email);
-  if (!normalized) {
+export async function isCheckoutSessionPaid(sessionId: string): Promise<boolean> {
+  const store = await ensureStore();
+  return store.sessions[sessionId]?.status === "paid";
+}
+
+export function createAccessCookieValue(sessionId: string): string {
+  const issuedAt = Date.now().toString();
+  const payload = `${sessionId}.${issuedAt}`;
+  const signature = hashWithSecret(payload);
+  return `${payload}.${signature}`;
+}
+
+export function verifyAccessCookieValue(value?: string | null): string | null {
+  if (!value) {
     return null;
   }
 
-  const store = await readStore();
-  return store.purchases[normalized] ?? null;
+  const chunks = value.split(".");
+  if (chunks.length < 3) {
+    return null;
+  }
+
+  const signature = chunks.pop();
+  const issuedAt = chunks.pop();
+  const sessionId = chunks.join(".");
+
+  if (!signature || !issuedAt || !sessionId) {
+    return null;
+  }
+
+  if (!/^\d+$/.test(issuedAt)) {
+    return null;
+  }
+
+  const signedPayload = `${sessionId}.${issuedAt}`;
+  const expectedSignature = hashWithSecret(signedPayload);
+
+  if (!timingSafeCompare(signature, expectedSignature)) {
+    return null;
+  }
+
+  const ageMs = Date.now() - Number(issuedAt);
+  const maxAgeMs = ACCESS_COOKIE_TTL_SECONDS * 1000;
+  if (ageMs > maxAgeMs) {
+    return null;
+  }
+
+  return sessionId;
 }
 
-export function createAccessToken(email: string, secret: string, daysValid = 30): string {
-  const payload: AccessTokenPayload = {
-    email: normalizeEmail(email),
-    exp: Date.now() + daysValid * 24 * 60 * 60 * 1000,
-  };
-
-  const encodedPayload = toBase64Url(JSON.stringify(payload));
-  const signature = createHmac("sha256", secret).update(encodedPayload).digest("base64url");
-
-  return `${encodedPayload}.${signature}`;
-}
-
-export function verifyAccessToken(token: string, secret: string): { valid: boolean; email?: string } {
-  if (!token.includes(".")) {
-    return { valid: false };
+export function verifyStripeWebhookSignature(
+  rawBody: string,
+  signatureHeader: string | null
+): boolean {
+  if (!signatureHeader || !rawBody) {
+    return false;
   }
 
-  const [encodedPayload, signature] = token.split(".");
-  const expectedSignature = createHmac("sha256", secret).update(encodedPayload).digest("base64url");
+  const entries = signatureHeader.split(",").map((entry) => entry.trim());
+  let timestamp: string | null = null;
+  const v1Signatures: string[] = [];
 
-  if (signature.length !== expectedSignature.length) {
-    return { valid: false };
-  }
-
-  const provided = Buffer.from(signature, "utf8");
-  const expected = Buffer.from(expectedSignature, "utf8");
-
-  if (!timingSafeEqual(provided, expected)) {
-    return { valid: false };
-  }
-
-  try {
-    const parsed = JSON.parse(fromBase64Url(encodedPayload)) as AccessTokenPayload;
-    if (!parsed.email || parsed.exp < Date.now()) {
-      return { valid: false };
+  entries.forEach((entry) => {
+    const separatorIndex = entry.indexOf("=");
+    if (separatorIndex === -1) {
+      return;
     }
 
-    return { valid: true, email: parsed.email };
-  } catch {
-    return { valid: false };
+    const key = entry.slice(0, separatorIndex);
+    const value = entry.slice(separatorIndex + 1);
+
+    if (key === "t") {
+      timestamp = value;
+      return;
+    }
+
+    if (key === "v1") {
+      v1Signatures.push(value);
+    }
+  });
+
+  if (!timestamp || v1Signatures.length === 0) {
+    return false;
   }
+
+  const expected = hashWithSecret(`${timestamp}.${rawBody}`);
+  return v1Signatures.some((signature) => timingSafeCompare(signature, expected));
 }

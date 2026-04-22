@@ -1,106 +1,159 @@
 "use client";
 
-import * as Select from "@radix-ui/react-select";
-import { ChevronDown } from "lucide-react";
-import type { VoiceMode } from "@/lib/audio-engine";
+import { useEffect, useMemo, useState } from "react";
+import { Switch } from "@headlessui/react";
+import { Bell, VolumeX } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  playSeverityTone,
+  speakText,
+  stopSpeech,
+  speechSynthesisSupported,
+} from "@/lib/audio-synthesis";
+import type { Diagnostic, DiagnosticSeverity } from "@/lib/accessibility-engine";
+import { cn } from "@/lib/utils";
 
 interface AudioFeedbackProps {
-  enabled: boolean;
-  speechRate: number;
-  voiceMode: VoiceMode;
-  onEnabledChange: (enabled: boolean) => void;
-  onSpeechRateChange: (rate: number) => void;
-  onVoiceModeChange: (mode: VoiceMode) => void;
-  onTestAnnouncement: () => void;
+  latestMessage: string;
+  latestSeverity: DiagnosticSeverity;
+  speechEnabled: boolean;
+  onSpeechEnabledChange: (enabled: boolean) => void;
+  diagnostics: Diagnostic[];
 }
 
 export default function AudioFeedback({
-  enabled,
-  speechRate,
-  voiceMode,
-  onEnabledChange,
-  onSpeechRateChange,
-  onVoiceModeChange,
-  onTestAnnouncement,
+  latestMessage,
+  latestSeverity,
+  speechEnabled,
+  onSpeechEnabledChange,
+  diagnostics,
 }: AudioFeedbackProps) {
-  return (
-    <section className="rounded-xl border border-white/10 bg-[#151b23] p-4" aria-labelledby="audio-feedback-heading">
-      <h2 id="audio-feedback-heading" className="text-sm font-semibold text-white">
-        Audio Feedback Controls
-      </h2>
-      <p className="mt-1 text-sm text-slate-300">
-        Configure spoken diagnostics and error tones for NVDA, JAWS, and VoiceOver workflows.
-      </p>
+  const [rate, setRate] = useState(1);
 
-      <div className="mt-4 space-y-4">
-        <label className="flex items-center justify-between text-sm text-slate-200" htmlFor="audio-enabled">
-          Enable audio feedback
-          <input
-            id="audio-enabled"
-            type="checkbox"
-            checked={enabled}
-            onChange={(event) => onEnabledChange(event.target.checked)}
-            className="h-4 w-4 rounded border border-slate-500 bg-slate-950 accent-cyan-400"
-          />
-        </label>
+  useEffect(() => {
+    if (!latestMessage || !speechEnabled) {
+      return;
+    }
+
+    void playSeverityTone(latestSeverity);
+    speakText(latestMessage, { rate });
+  }, [latestMessage, latestSeverity, rate, speechEnabled]);
+
+  const counts = useMemo(() => {
+    return diagnostics.reduce(
+      (memo, diagnostic) => {
+        memo[diagnostic.severity] += 1;
+        return memo;
+      },
+      { error: 0, warning: 0, info: 0 }
+    );
+  }, [diagnostics]);
+
+  return (
+    <Card className="border-border/80 bg-card/90">
+      <CardHeader>
+        <CardTitle className="text-base">Audio Feedback Console</CardTitle>
+        <CardDescription>
+          Spoken diagnostics with severity-aware tones designed for coding flow.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <Switch
+            checked={speechEnabled}
+            onChange={(nextValue) => {
+              onSpeechEnabledChange(nextValue);
+              if (!nextValue) {
+                stopSpeech();
+              }
+            }}
+            className={cn(
+              "inline-flex h-7 w-12 items-center rounded-full border border-border p-1 transition-colors",
+              speechEnabled ? "bg-primary" : "bg-muted"
+            )}
+            aria-label="Enable spoken feedback"
+          >
+            <span
+              className={cn(
+                "size-5 rounded-full bg-white transition-transform",
+                speechEnabled ? "translate-x-5" : "translate-x-0"
+              )}
+            />
+          </Switch>
+          <span className="text-sm font-medium">
+            {speechEnabled ? "Speech enabled" : "Speech muted"}
+          </span>
+          {!speechSynthesisSupported() ? (
+            <Badge variant="destructive">Speech API unavailable</Badge>
+          ) : null}
+        </div>
 
         <div className="space-y-2">
-          <label htmlFor="speech-rate" className="text-sm text-slate-200">
-            Speech rate: {speechRate.toFixed(2)}x
+          <label htmlFor="speech-rate" className="text-xs text-muted-foreground">
+            Speech rate ({rate.toFixed(1)}x)
           </label>
           <input
             id="speech-rate"
             type="range"
-            min={0.8}
-            max={1.5}
-            step={0.05}
-            value={speechRate}
-            onChange={(event) => onSpeechRateChange(Number(event.target.value))}
-            className="w-full"
+            min={0.7}
+            max={1.6}
+            step={0.1}
+            value={rate}
+            onChange={(event) => setRate(Number(event.target.value))}
+            className="w-full accent-primary"
           />
         </div>
 
-        <div className="space-y-2">
-          <span className="text-sm text-slate-200">Voice detail mode</span>
-          <Select.Root value={voiceMode} onValueChange={(value) => onVoiceModeChange(value as VoiceMode)}>
-            <Select.Trigger
-              className="inline-flex w-full items-center justify-between rounded-md border border-white/15 bg-[#0d1117] px-3 py-2 text-sm text-slate-100"
-              aria-label="Voice detail mode"
-            >
-              <Select.Value />
-              <Select.Icon>
-                <ChevronDown className="h-4 w-4" />
-              </Select.Icon>
-            </Select.Trigger>
-            <Select.Portal>
-              <Select.Content className="overflow-hidden rounded-md border border-white/15 bg-[#0d1117] shadow-lg">
-                <Select.Viewport className="p-1">
-                  <Select.Item
-                    value="concise"
-                    className="cursor-pointer rounded px-2 py-1 text-sm text-slate-100 outline-none hover:bg-white/10"
-                  >
-                    <Select.ItemText>Concise</Select.ItemText>
-                  </Select.Item>
-                  <Select.Item
-                    value="detailed"
-                    className="cursor-pointer rounded px-2 py-1 text-sm text-slate-100 outline-none hover:bg-white/10"
-                  >
-                    <Select.ItemText>Detailed</Select.ItemText>
-                  </Select.Item>
-                </Select.Viewport>
-              </Select.Content>
-            </Select.Portal>
-          </Select.Root>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <Badge variant="destructive">Errors: {counts.error}</Badge>
+          <Badge variant="secondary">Warnings: {counts.warning}</Badge>
+          <Badge variant="outline">Info: {counts.info}</Badge>
         </div>
 
-        <button
-          type="button"
-          onClick={onTestAnnouncement}
-          className="w-full rounded-md border border-cyan-400/40 bg-cyan-500/10 px-3 py-2 text-sm font-medium text-cyan-200 hover:bg-cyan-500/20"
-        >
-          Test announcement
-        </button>
-      </div>
-    </section>
+        <div className="rounded-lg border border-border/70 bg-background/40 p-3 text-sm">
+          <p className="mb-1 flex items-center gap-2 font-medium">
+            <Bell className="size-4" aria-hidden="true" /> Latest announcement
+          </p>
+          <p className="text-muted-foreground">
+            {latestMessage || "No diagnostics announced yet."}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              if (latestMessage) {
+                void playSeverityTone(latestSeverity);
+                speakText(latestMessage, { rate });
+              }
+            }}
+          >
+            Replay latest
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => stopSpeech()}
+            title="Stop speech playback"
+          >
+            <VolumeX className="mr-1 size-4" aria-hidden="true" /> Stop speech
+          </Button>
+        </div>
+
+        <div aria-live="assertive" className="sr-only" role="status">
+          {latestMessage}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
